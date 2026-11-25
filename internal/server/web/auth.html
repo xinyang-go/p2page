@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>p2page · {{.Mode}}</title>
+<link rel="stylesheet" href="/__p2page/style.css">
+<script src="/__p2page/login.js" defer></script>
+<main class="auth">
+  <p class="eyebrow">P2PAGE / CONTROL PLANE</p>
+  <h1>{{if eq .Mode "register"}}Create account{{else}}Sign in{{end}}</h1>
+  {{if .Error}}<p class="notice" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="/{{.Mode}}">
+    <input name="next" type="hidden" value="{{.Next}}">
+    <label>Username <input name="name" autocomplete="username" pattern="[a-z0-9]{1,30}" placeholder="lowercase letters and digits" required></label>
+    {{if eq .Mode "register"}}
+    <label>Display name <input name="display" maxlength="256"></label>
+    <label>Invitation <input name="invite" autocomplete="off" required></label>
+    <label>Password <input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+    <button>Create account</button>
+    <a href="/login?next={{.Next}}">Back to sign in</a>
+    {{else}}
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <button>Sign in</button>
+    <a href="/register?next={{.Next}}">Register with an invitation</a>
+    {{end}}
+  </form>
+</main>
+</html>

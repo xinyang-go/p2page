@@ -1,0 +1,7 @@
+{
+  "listen": "127.0.0.1:8080",
+  "domain": "example.com",
+  "database": "/var/lib/p2page/p2page.db",
+  "admin_username": "admin",
+  "trusted_proxy_cidr": "127.0.0.1/32"
+}

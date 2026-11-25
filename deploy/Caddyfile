@@ -1,0 +1,7 @@
+# Replace example.com and mount a certificate that covers both names.
+example.com, *.example.com {
+	tls /etc/p2page/tls/fullchain.pem /etc/p2page/tls/privkey.pem
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Real-IP {remote_host}
+	}
+}

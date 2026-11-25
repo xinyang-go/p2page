@@ -1,0 +1,20 @@
+[Unit]
+Description=P2Page public signaling and management server
+After=network.target
+
+[Service]
+User=p2page
+Group=p2page
+StateDirectory=p2page
+StateDirectoryMode=0700
+EnvironmentFile=-/etc/p2page/bootstrap.env
+ExecStart=/usr/local/bin/p2page server -config /etc/p2page/server.json
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>p2page · Application</title>
+<link rel="stylesheet" href="/__p2page/style.css">
+<body class="shell">
+  <iframe id="app" title="Application" allow="fullscreen; autoplay" data-settings="{{.}}"></iframe>
+  <div id="connection" class="connection" role="status" aria-live="polite">
+    <strong id="state">Connecting</strong>
+    <p id="detail">Negotiating WebRTC…</p>
+    <button id="retry" hidden>Reconnect</button>
+  </div>
+  <button id="orb" class="orb" title="Connection status — drag to move" aria-label="Connection status" aria-controls="connection" aria-expanded="true">···</button>
+  <script type="module" src="/__p2page/shell.js"></script>
+</body>
+</html>

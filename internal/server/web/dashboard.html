@@ -1,0 +1,89 @@
+{{define "app-fields"}}
+<label>App name <input name="name" value="{{.Name}}" pattern="[a-z0-9]{1,30}" required></label>
+<label>Display name <input name="display" value="{{.Display}}" maxlength="256"></label>
+<label>Upstream URL <input name="target" type="url" value="{{.Target}}" placeholder="http://192.168.1.10:8080/" required></label>
+<label>ICE mode <select name="mode"><option value="stun" {{if ne .Mode "turn"}}selected{{end}}>STUN only / direct</option><option value="turn" {{if eq .Mode "turn"}}selected{{end}}>TURN fallback</option></select></label>
+<label>ICE servers (JSON) <textarea name="ice" rows="4" placeholder='[{"urls":["stun:stun.example.net:3478"]}]'>{{.ICEText}}</textarea></label>
+<label class="check"><input name="public" type="checkbox" {{if .Public}}checked{{end}}> Public — anyone with the URL can access</label>
+{{end}}
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>p2page · Dashboard</title>
+<link rel="stylesheet" href="/__p2page/style.css">
+<header class="bar"><strong>P2PAGE</strong><form method="post" action="/logout"><button class="secondary">Sign out</button></form></header>
+<main class="dashboard">
+  <p class="eyebrow">{{.Domain}} / {{.User.Name}}</p>
+  <h1>{{.User.Display}}</h1>
+  {{if .Secret}}<p class="notice"><code>{{.Secret}}</code></p>{{end}}
+  {{if .Error}}<p class="notice" role="alert">{{.Error}}</p>{{end}}
+  <div class="columns">
+    <section>
+      <h2>Clients</h2>
+      {{range .Clients}}
+      <div class="item">
+        <span>{{.Name}} <small>{{if .Online}}Online{{else}}Offline{{end}}</small></span>
+        <form method="post">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="secondary" name="action" value="client-delete">Delete with apps</button>
+        </form>
+      </div>
+      {{else}}<p>No clients yet.</p>{{end}}
+      <form class="card" method="post">
+        <label>Client label <input name="name" maxlength="128" required></label>
+        <button name="action" value="client-add">Add client</button>
+      </form>
+    </section>
+    <section>
+      <h2>Applications</h2>
+      {{range .Apps}}
+      {{$a := .}}
+      <details class="card">
+        <summary>{{.Display}} <small>{{if .Public}}Public{{else}}Private{{end}} · {{.Mode}}</small></summary>
+        <p><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.URL}}</a></p>
+        <form method="post">
+          <input name="id" type="hidden" value="{{.ID}}">
+          <label>Client <select name="client" required>{{range $.Clients}}<option value="{{.ID}}" {{if eq .ID $a.ClientID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+          {{template "app-fields" .}}
+          <div class="row"><button name="action" value="app-edit">Save</button><button class="secondary" formnovalidate name="action" value="app-delete">Delete</button></div>
+        </form>
+      </details>
+      {{else}}<p>No applications yet.</p>{{end}}
+      {{if .Clients}}
+      <form class="card" method="post">
+        <h3>New application</h3>
+        <label>Client <select name="client" required>{{range .Clients}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+        {{template "app-fields" (indexApp)}}
+        <button name="action" value="app-add">Add application</button>
+      </form>
+      {{end}}
+    </section>
+  </div>
+  {{if .User.Admin}}
+  <div class="columns">
+    <section>
+      <h2>Users</h2>
+      {{range .Members}}
+      <div class="item">
+        <span>{{.Display}} <small>{{.Name}} · {{if .Admin}}Administrator{{else if .Disabled}}Disabled{{else}}Active{{end}}</small></span>
+        {{if not .Admin}}<form method="post"><input name="id" type="hidden" value="{{.ID}}">
+          <button class="secondary" name="action" value="{{if .Disabled}}user-enable{{else}}user-disable{{end}}">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+        </form>{{end}}
+      </div>
+      {{end}}
+    </section>
+    <section>
+      <h2>Invitations</h2>
+      <form class="card" method="post"><button name="action" value="invite-add">Create invitation</button></form>
+      {{range .Invites}}
+      <div class="item">
+        <span>#{{.ID}} · {{.Status}} <small>{{.Expires}}</small></span>
+        {{if eq .Status "Active"}}<form method="post"><input name="id" type="hidden" value="{{.ID}}"><button class="secondary" name="action" value="invite-revoke">Revoke</button></form>{{end}}
+      </div>
+      {{end}}
+    </section>
+  </div>
+  {{end}}
+</main>
+</html>

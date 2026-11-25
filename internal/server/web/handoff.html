@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>p2page · Open application</title>
+<link rel="stylesheet" href="/__p2page/style.css">
+<main class="auth">
+  <h1>Opening application</h1>
+  <form method="post" action="{{.Action}}" id="handoff">
+    <input type="hidden" name="ticket" value="{{.Ticket}}">
+    <button>Continue</button>
+  </form>
+</main>
+<script nonce="{{.Nonce}}">
+  const handoff = document.getElementById('handoff');
+  if (location.hash) handoff.action += location.hash;
+  handoff.submit();
+</script>
+</html>

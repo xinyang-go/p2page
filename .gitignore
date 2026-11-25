@@ -1,0 +1,7 @@
+/p2page
+*.db
+*.db-wal
+*.db-shm
+/server.json
+/client.json
+/data/

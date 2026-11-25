@@ -1,0 +1,13 @@
+{
+  "server": "https://example.com",
+  "token": "TOKEN_FROM_THE_DASHBOARD",
+  "upstreams": [
+    {"url": "http://192.168.1.10:8080"},
+    {"url": "https://nas.lan:8443", "ca_file": "nas-ca.pem"}
+  ],
+  "allowed_ice_urls": [
+    "stun:stun.example.net:3478",
+    "turn:turn.example.net:3478?transport=udp",
+    "turns:turn.example.net:5349?transport=tcp"
+  ]
+}
