@@ -1,0 +1,24 @@
+# p2page itself only. Terminate HTTPS at an external reverse proxy; this file
+# does not include Caddy, Cloudflare Tunnel, or any other front proxy.
+#
+# Copy this file to a deployment directory and keep server.json and data next
+# to it. The container runs as UID/GID 10001; make both readable/writable by
+# that user.
+services:
+  p2page:
+    image: ghcr.io/xinyang-go/p2page:latest
+    restart: unless-stopped
+    command: ["server", "-config", "/etc/p2page/server.json"]
+    # Bind to host loopback only. The external HTTPS proxy connects here.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./server.json:/etc/p2page/server.json:ro
+      - ./data:/var/lib/p2page
+    environment:
+      # Required only for the first start; leave unset afterwards.
+      P2PAGE_ADMIN_PASSWORD: ${P2PAGE_ADMIN_PASSWORD:-}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

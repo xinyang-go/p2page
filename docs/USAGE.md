@@ -104,6 +104,80 @@ Server 自身返回 HSTS、`X-Content-Type-Options: nosniff`、`Referrer-Policy`
 - 备份时使用 SQLite 在线备份，或包含 `-wal` / `-shm` 的一致快照。不要在运行中只复制 `.db` 文件而忽略 WAL。
 - Server 重启会断开会话的数据通道；Client 会重连信令，浏览器重新连接后仍可使用未过期的登录和 Client 内存中的 Cookie。
 
+### 2.6 Docker 部署（仅 p2page 本体）
+
+发布的镜像 `ghcr.io/xinyang-go/p2page` 包含 `p2page` 二进制及其运行依赖（CA 证书和时区数据），**不包含** Caddy、Cloudflare Tunnel、nginx 或其他 HTTPS 反向代理。请按 2.3 节的要求在容器外终止 TLS，再把请求转发给容器。镜像提供 `linux/amd64` 和 `linux/arm64` 两种架构，以 UID/GID `10001` 运行。
+
+GHCR 包默认是私有的。请在仓库的包设置中改为公开，或在拉取前登录：
+
+```sh
+docker login ghcr.io
+```
+
+准备部署目录：
+
+```sh
+mkdir -p /srv/p2page/data
+cd /srv/p2page
+cp /path/to/p2page/deploy/docker-compose.example.yml compose.yaml
+sudo chown -R 10001:10001 data
+```
+
+在 `compose.yaml` 同级创建 `server.json`。容器内必须监听所有接口，同时把发布到宿主机的端口限制在回环地址：
+
+```json
+{
+  "listen": "0.0.0.0:8080",
+  "domain": "example.com",
+  "database": "/var/lib/p2page/p2page.db",
+  "admin_username": "admin"
+}
+```
+
+```sh
+sudo chown 10001:10001 server.json
+chmod 600 server.json
+```
+
+`deploy/docker-compose.example.yml` 发布的端口是 `127.0.0.1:8080:8080`。外部 HTTPS 代理应转发到 `127.0.0.1:8080`，保留 `Host`，支持 WebSocket Upgrade，并建议覆盖 `X-Real-IP`，与原生部署完全一致。**不要把容器端口发布到公网接口。**
+
+容器看到的是反向代理的地址，而不是访客地址。只有在代理确实覆盖 `X-Real-IP`，并且能明确指定代理来源网段（例如代理与 p2page 共用的专用 Docker 网络）时，才配置 `trusted_proxy_cidr`。不要使用 `0.0.0.0/0` 或过大的网段，否则客户端可以伪造 `X-Real-IP` 绕过按 IP 的限流。
+
+首次启动：
+
+```sh
+P2PAGE_ADMIN_PASSWORD='replace-with-a-long-random-passphrase' docker compose up -d
+docker compose logs -f p2page
+```
+
+管理员创建成功后，删除该变量并重新创建容器：
+
+```sh
+unset P2PAGE_ADMIN_PASSWORD
+docker compose up -d
+```
+
+变量未设置时，示例 compose 会传入空值；初始化完成后 Server 会忽略它。
+
+升级：
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+生产环境应固定发布版本标签，而不是使用 `latest`，并保证 Server 与 Client 一起升级。不要对同一数据库运行多个 Server 容器。镜像不包含 `sqlite3` 命令行工具；备份时请使用宿主机上的 SQLite 客户端或按 9.3 节做等价的一致快照。
+
+同一个镜像也可以运行 Client。在 Linux 上建议使用 host 网络，使 ICE 能枚举内网接口，并让 Client 直接访问局域网上游：
+
+```sh
+docker run -d --name p2page-client --network host --restart unless-stopped \
+  -v /etc/p2page/client.json:/etc/p2page/client.json:ro \
+  ghcr.io/xinyang-go/p2page:latest client -config /etc/p2page/client.json
+```
+
+确保 UID `10001` 可读取 `client.json` 以及其中引用的 `ca_file`，并让该配置目录不包含其他秘密。
+
 ## 3. Client 配置
 
 Client 通过 `p2page client -config <path>` 启动。配置文件同样是严格 JSON，未知字段会导致启动失败。
@@ -472,7 +546,8 @@ Server 只处理控制面：账户、授权、应用查找、SDP 转发和撤销
 上线前至少确认：
 
 - [ ] `example.com` 和 `*.example.com` 解析正确，证书覆盖两个名字。
-- [ ] Server 只监听回环，端口未直接暴露公网。
+- [ ] Server 端口未直接暴露公网；原生部署监听回环，Docker 部署只发布到宿主机回环。
+- [ ] 使用 Docker 时，数据目录归 UID `10001` 所有，并由外部代理终止 TLS。
 - [ ] 反向代理保留 Host、支持 WebSocket、正确覆盖 `X-Real-IP`。
 - [ ] `P2PAGE_ADMIN_PASSWORD` 已从运行环境删除，数据库权限为 `0600`。
 - [ ] Client 配置权限为 `0600`，token 未泄露，`upstreams` 最小化。

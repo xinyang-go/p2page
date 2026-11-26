@@ -55,7 +55,9 @@ Requirements:
 | `internal/client/client.go` | Client config, signaling, PeerConnection, upstream allowlist. |
 | `internal/client/stream.go` | HTTP/WebSocket proxy, response rewriting, backpressure. |
 | `internal/client/cookies.go` | Application cookie store and control channel. |
-| `deploy/` | Caddy, systemd, and sample configurations. |
+| `deploy/` | Caddy, systemd, Docker Compose, and sample configurations. |
+| `Dockerfile`, `.dockerignore` | Multi-stage image for the p2page binary; no bundled reverse proxy. |
+| `.github/workflows/ci.yml` | Formatting, vet, tests, and GHCR image builds. |
 | `docs/` | Bilingual usage and development documentation. |
 
 ## Required Constraints

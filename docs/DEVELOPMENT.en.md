@@ -348,6 +348,14 @@ CGO_ENABLED=0 go build -trimpath -o p2page ./cmd/p2page
 
 The output is a single binary. The systemd units in `deploy/` assume installation at `/usr/local/bin/p2page`.
 
+The container image uses the same static build:
+
+```sh
+docker build -t p2page .
+```
+
+It is a multi-stage build, runs as UID/GID `10001`, and contains the binary plus CA certificates and time zone data. It does not include an HTTPS reverse proxy.
+
 ### 11.3 Local Run
 
 There is no separate development mode. Manual runs still require:
@@ -445,5 +453,8 @@ Before submitting:
 - `deploy/client.example.json`: client configuration sample with `ca_file` and `allowed_ice_urls`.
 - `deploy/p2page-server.service`: server systemd unit with `StateDirectory`, `EnvironmentFile`, and hardening.
 - `deploy/p2page-client.service`: client systemd unit; `RestrictAddressFamilies` must include `AF_NETLINK`.
+- `deploy/docker-compose.example.yml`: server-only Compose example; it assumes an external HTTPS reverse proxy.
+- `Dockerfile` / `.dockerignore`: multi-stage static build and non-root runtime image.
+- `.github/workflows/ci.yml`: formatting, vet, unit and race tests, plus multi-architecture image builds published to GHCR on non-PR events.
 
-See [USAGE.en.md](USAGE.en.md) for deployment, backup, upgrade, and troubleshooting.
+See [USAGE.en.md](USAGE.en.md) for deployment, Docker, backup, upgrade, and troubleshooting.

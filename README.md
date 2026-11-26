@@ -64,6 +64,8 @@ go build -trimpath -o p2page ./cmd/p2page
 
 产物只有一个 `p2page` 二进制。Server 和 Client 使用同一份程序，通过子命令区分。
 
+也可以使用 `ghcr.io/xinyang-go/p2page` 发布的容器镜像。镜像只包含 p2page 本体，仍需要外部 HTTPS 反向代理。Docker 部署方法见 [USAGE](docs/USAGE.md) 第 2.6 节。
+
 ### 2. 配置 DNS、证书与反向代理
 
 把 `example.com` 和 `*.example.com` 指向反向代理，并为两个名字配置 HTTPS。反向代理应满足以下要求：

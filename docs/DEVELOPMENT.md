@@ -348,6 +348,14 @@ CGO_ENABLED=0 go build -trimpath -o p2page ./cmd/p2page
 
 产物只有一个二进制。`deploy/` 中的 systemd 单元假定安装到 `/usr/local/bin/p2page`。
 
+容器镜像使用同样的静态编译：
+
+```sh
+docker build -t p2page .
+```
+
+镜像采用多阶段构建，以 UID/GID `10001` 运行，包含二进制、CA 证书和时区数据，不内置 HTTPS 反向代理。
+
 ### 11.3 本地运行
 
 项目没有独立的开发模式。手动运行时仍需要：
@@ -445,5 +453,8 @@ P2PAGE_BROWSER_TEST=1 go test -count=1 -run '^TestBrowser$' -v ./internal/server
 - `deploy/client.example.json`：Client 配置样例，含 `ca_file` 和 `allowed_ice_urls`。
 - `deploy/p2page-server.service`：Server systemd 单元，含 `StateDirectory`、`EnvironmentFile` 和加固项。
 - `deploy/p2page-client.service`：Client systemd 单元，`RestrictAddressFamilies` 必须包含 `AF_NETLINK`。
+- `deploy/docker-compose.example.yml`：仅 Server 的 Compose 示例，假定外部 HTTPS 反向代理。
+- `Dockerfile` / `.dockerignore`：多阶段静态编译和非 root 运行镜像。
+- `.github/workflows/ci.yml`：格式检查、vet、单元与 race 测试，以及非 PR 事件发布到 GHCR 的多架构镜像构建。
 
-部署相关的运行、备份、升级和排障见 [USAGE.md](USAGE.md)。
+部署、Docker、备份、升级和排障见 [USAGE.md](USAGE.md)。

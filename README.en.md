@@ -64,6 +64,8 @@ go build -trimpath -o p2page ./cmd/p2page
 
 The result is a single `p2page` binary. The server and client are the same program, selected by subcommand.
 
+You can also run the published container image from `ghcr.io/xinyang-go/p2page`. The image contains only p2page and still requires an external HTTPS reverse proxy. See Docker deployment in [USAGE](docs/USAGE.en.md) (Section 2.6).
+
 ### 2. Configure DNS, TLS, and the reverse proxy
 
 Point `example.com` and `*.example.com` at the reverse proxy and configure HTTPS for both names. The reverse proxy should meet these requirements:

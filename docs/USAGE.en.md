@@ -104,6 +104,80 @@ After first initialization, remove the password from `bootstrap.env` and restart
 - For backups, use SQLite online backup or a consistent snapshot that includes `-wal` and `-shm`. Do not copy only the `.db` file while the server is running and ignore the WAL.
 - Restarting the server drops live data channels. Clients reconnect their signaling, and browsers can reconnect using unexpired logins and cookies still held in client memory.
 
+### 2.6 Docker Deployment (p2page only)
+
+The published image `ghcr.io/xinyang-go/p2page` contains the `p2page` binary and its runtime dependencies (CA certificates and time zone data). It does **not** include Caddy, Cloudflare Tunnel, nginx, or any other HTTPS reverse proxy. Terminate TLS outside the container and forward requests to it, as described in Section 2.3. Images are built for `linux/amd64` and `linux/arm64` and run as UID/GID `10001`.
+
+The GHCR package is private by default. Make it public in the repository's package settings, or authenticate before pulling:
+
+```sh
+docker login ghcr.io
+```
+
+Prepare a deployment directory:
+
+```sh
+mkdir -p /srv/p2page/data
+cd /srv/p2page
+cp /path/to/p2page/deploy/docker-compose.example.yml compose.yaml
+sudo chown -R 10001:10001 data
+```
+
+Create `server.json` next to `compose.yaml`. The container must listen on all interfaces; keep the published port bound to host loopback:
+
+```json
+{
+  "listen": "0.0.0.0:8080",
+  "domain": "example.com",
+  "database": "/var/lib/p2page/p2page.db",
+  "admin_username": "admin"
+}
+```
+
+```sh
+sudo chown 10001:10001 server.json
+chmod 600 server.json
+```
+
+`deploy/docker-compose.example.yml` publishes `127.0.0.1:8080:8080`. Configure the external HTTPS proxy to forward to `127.0.0.1:8080`, preserve `Host`, support WebSocket Upgrade, and preferably overwrite `X-Real-IP`, exactly as with a native installation. **Never publish the container port on a public interface.**
+
+The container sees the reverse proxy's address, not the visitor's address. Leave `trusted_proxy_cidr` empty unless the proxy overwrites `X-Real-IP` and you can name the exact proxy source network, such as a dedicated Docker network shared by the proxy and p2page. Do not use `0.0.0.0/0` or a broad network; that lets clients spoof `X-Real-IP` and bypass IP-based rate limits.
+
+First start:
+
+```sh
+P2PAGE_ADMIN_PASSWORD='replace-with-a-long-random-passphrase' docker compose up -d
+docker compose logs -f p2page
+```
+
+After the administrator has been created, remove the variable and recreate the container:
+
+```sh
+unset P2PAGE_ADMIN_PASSWORD
+docker compose up -d
+```
+
+The compose example passes an empty value when the variable is unset; the server ignores it after initialization.
+
+Upgrades:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+Pin a release tag instead of `latest` in production, and upgrade the server and client together. Do not run more than one server container against the same database. The image does not include the `sqlite3` command-line tool; perform backups with a host SQLite client or an equivalent consistent snapshot as described in Section 9.3.
+
+The same image can run the client. On Linux, use host networking so ICE can enumerate the intranet interfaces and the client can reach LAN upstreams directly:
+
+```sh
+docker run -d --name p2page-client --network host --restart unless-stopped \
+  -v /etc/p2page/client.json:/etc/p2page/client.json:ro \
+  ghcr.io/xinyang-go/p2page:latest client -config /etc/p2page/client.json
+```
+
+Keep `client.json` and any `ca_file` files readable by UID `10001`, and use a configuration directory that contains no other secrets.
+
 ## 3. Client Configuration
 
 Start the client with `p2page client -config <path>`. Its configuration file is also strict JSON; unknown fields cause startup to fail.
@@ -472,7 +546,8 @@ Exceeding limits usually appears as reconnects, `429 Too many connections`, `Cli
 At minimum, confirm:
 
 - [ ] `example.com` and `*.example.com` resolve correctly and the certificate covers both names.
-- [ ] The server listens only on loopback and its port is not exposed directly to the internet.
+- [ ] The server port is not exposed directly to the internet; native deployments listen on loopback, and Docker deployments publish only to host loopback.
+- [ ] For Docker, the data directory is owned by UID `10001`, and TLS is terminated by an external proxy.
 - [ ] The reverse proxy preserves Host, supports WebSocket, and correctly overwrites `X-Real-IP`.
 - [ ] `P2PAGE_ADMIN_PASSWORD` has been removed from the runtime environment and the database is mode `0600`.
 - [ ] The client configuration is mode `0600`, the token is not leaked, and `upstreams` is minimal.
