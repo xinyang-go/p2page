@@ -24,6 +24,22 @@ function status(state, detail, failed = false) {
 function setPanel(shown) {
   panel.hidden = !shown;
   orb.setAttribute("aria-expanded", String(shown));
+  if (shown) positionPanel();
+}
+// Keep the status popover next to the orb, wherever it has been dragged.
+// Prefer the space above it, then below, and clamp it into the viewport.
+function positionPanel() {
+  if (panel.hidden) return;
+  const gap = 10;
+  const rect = orb.getBoundingClientRect();
+  const width = panel.offsetWidth, height = panel.offsetHeight;
+  let left = rect.right - width;
+  let top = rect.top - gap - height;
+  if (top < gap) top = rect.bottom + gap;
+  left = Math.max(gap, Math.min(innerWidth - width - gap, left));
+  top = Math.max(gap, Math.min(innerHeight - height - gap, top));
+  panel.style.left = left + "px";
+  panel.style.top = top + "px";
 }
 retry.onclick = () => location.reload();
 function appRoute() {
@@ -139,12 +155,16 @@ orb.onpointermove = event => {
   drag.moved = true;
   orb.style.left = Math.max(0, Math.min(innerWidth - orb.offsetWidth, drag.left + dx)) + "px";
   orb.style.top = Math.max(0, Math.min(innerHeight - orb.offsetHeight, drag.top + dy)) + "px";
+  positionPanel();
 };
 orb.onclick = event => {
   if (!drag?.moved || event.detail === 0) setPanel(panel.hidden);
   drag = null;
 };
 orb.onpointercancel = () => { drag = null; };
+addEventListener("resize", positionPanel);
+new ResizeObserver(positionPanel).observe(panel);
+positionPanel();
 
 function transportOpen() { return control?.readyState === "open" && connection?.connectionState === "connected"; }
 function open() { return initialized && transportOpen(); }
