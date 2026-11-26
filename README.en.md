@@ -21,6 +21,31 @@ The philosophy is simple: take the direct path when possible, keep applications 
 
 > p2page is for interactive pages in a real browser, not a general reverse proxy for command-line tools or crawlers.
 
+## Upstream Application Support
+
+"Upstream application" here means the intranet web application you want to publish. **Supported** means it works directly; **Conditional** means the upstream application or browser must meet certain conditions; **Not supported** means it is outside the current scope.
+
+| Feature / Scenario | Support | Notes |
+| --- | --- | --- |
+| Ordinary pages, same-origin navigation, Fetch/XHR, forms | Supported | The application runs in a same-origin iframe inside the browser shell |
+| SSE / server push (EventSource) | Supported | Suitable for logs, notifications, and other streaming responses |
+| Video / audio Range requests | Supported | Supports Range requests used for seeking |
+| Uploads / downloads | Supported | Large transfers are streamed; very large uploads require the upstream to accept HTTP/1.1 chunked or HTTP/2 request bodies; right-click "Save link as" is out of scope |
+| Same-origin WebSocket | Supported | Text, binary, and subprotocols, up to 16 MiB per message; same-origin window only, WebSocket inside Web Workers is not bridged |
+| Cookies / application login state | Supported | Includes HttpOnly; cookies stay in client memory and do not cross subdomains; SameSite is approximate |
+| SPA History / `#` routes | Supported | Path, query, and hash in the address bar stay synchronized |
+| Top-level form POST | Supported | With the p2page Service Worker, `_top` / `_blank` submissions work; 307/308 are not replayed |
+| Intranet HTTPS / self-signed certificates | Supported | Use `ca_file`; `insecure_skip_verify` is available on a trusted intranet |
+| iframe embedding | Conditional | The upstream must not send `X-Frame-Options: DENY` or a strict `frame-ancestors` |
+| Upstream CSP | Conditional | p2page does not remove CSP; it must allow the same-origin `/__p2page/socket.js` for the WebSocket and cookie compatibility layers |
+| Relative URLs / hard-coded intranet absolute URLs | Conditional | Relative URLs work; hard-coded intranet absolute URLs are not generically rewritten |
+| Upstream Service Worker | Not supported | p2page does not register the upstream's Service Worker |
+| curl / native API clients / crawlers | Not supported | Opening the application URL directly returns the browser shell, not an HTTP reverse proxy |
+| HTTP compression passthrough / browser HTTP cache | Not supported | Data-channel responses are not automatically cached and are not transparently compressed |
+| CONNECT / TRACE / TRACK | Not supported | These methods are rejected; ordinary HTTP methods remain available |
+
+The upstream application should still enforce its own login, CSRF, and Origin checks. See [docs/USAGE.en.md](docs/USAGE.en.md) for the full compatibility matrix and limitations.
+
 ## Quick Start
 
 The following example uses a public domain `example.com`. You need:

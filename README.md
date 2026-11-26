@@ -21,6 +21,31 @@ p2page 让你用普通浏览器访问运行在内网（家里、办公室或实�
 
 > p2page 面向真实浏览器中的交互式网页，不是给命令行工具或爬虫使用的通用反向代理。
 
+## 上游应用支持情况
+
+这里的“上游应用”指你要发布的内网 Web 应用。**支持**表示可直接使用；**有条件支持**表示需要上游应用或浏览器满足条件；**不支持**表示不在当前范围。
+
+| 功能 / 场景 | 支持情况 | 说明 |
+| --- | --- | --- |
+| 普通网页、同源导航、Fetch/XHR、表单 | 支持 | 应用在浏览器外壳的同源 iframe 中运行 |
+| SSE / 服务端推送（EventSource） | 支持 | 适合日志、通知等流式响应 |
+| 视频 / 音频 Range 请求 | 支持 | 支持拖动进度条等 Range 请求 |
+| 上传 / 下载 | 支持 | 大文件走流式传输；超大上传需上游接受 HTTP/1.1 chunked 或 HTTP/2 请求体；右键“链接另存为”不在此范围 |
+| 同源 WebSocket | 支持 | 文本、二进制和子协议，单条消息 ≤ 16 MiB；仅限同源窗口，Web Worker 内的 WebSocket 不桥接 |
+| Cookie / 应用登录态 | 支持 | 包括 HttpOnly；Cookie 保存在内网 Client 内存中，不跨子域；SameSite 为近似兼容 |
+| SPA History / `#` 路由 | 支持 | 地址栏的路径、查询参数和 hash 会同步 |
+| 顶层表单 POST | 支持 | 受 p2page Service Worker 控制时可通过 `_top` / `_blank` 提交；不重放 307/308 |
+| 内网 HTTPS / 自签证书 | 支持 | 可用 `ca_file`；可信内网可使用 `insecure_skip_verify` |
+| iframe 嵌入 | 有条件支持 | 上游不得返回 `X-Frame-Options: DENY` 或严格的 `frame-ancestors` |
+| 上游 CSP | 有条件支持 | p2page 不移除 CSP；需允许加载同源 `/__p2page/socket.js` 才能使用 WebSocket 和 Cookie 兼容层 |
+| 相对 URL / 写死的内网绝对地址 | 有条件支持 | 相对 URL 可用；写死的内网绝对地址不会通用重写 |
+| 上游自己的 Service Worker | 不支持 | p2page 不会注册上游的 Service Worker |
+| curl / 原生 API 客户端 / 爬虫 | 不支持 | 直接访问应用 URL 得到的是浏览器外壳，不是 HTTP 反向代理 |
+| HTTP 压缩透传 / 浏览器 HTTP 缓存 | 不支持 | 数据通道响应不会自动进入浏览器缓存，也不做压缩透传 |
+| CONNECT / TRACE / TRACK | 不支持 | 这些方法会被拒绝；常规 HTTP 方法可用 |
+
+上游应用自身的登录、CSRF 和 Origin 校验仍应保留。完整的兼容范围和限制见 [docs/USAGE.md](docs/USAGE.md)。
+
 ## Quick Start
 
 以下步骤用一个公网域名 `example.com` 演示。需要准备：
