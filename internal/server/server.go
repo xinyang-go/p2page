@@ -354,7 +354,7 @@ func shellPage(w http.ResponseWriter, r *http.Request, a app) {
 	// The shell mirrors the application's route. Don't copy it into the
 	// Referer of the shell's assets or signaling requests.
 	w.Header().Set("Referrer-Policy", "origin")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; worker-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	settings, _ := json.Marshal(a.browserSettings())
 	page(w, "shell.html", string(settings))
 }

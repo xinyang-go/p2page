@@ -37,6 +37,24 @@
     // worker URL or replace the worker that carries the WebRTC transport.
     navigator.serviceWorker.register = () => Promise.reject(
       new DOMException("Application Service Workers are not supported through p2page","NotSupportedError"));
+    window.addEventListener("click", event => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      const link = event.composedPath().find(node => node instanceof HTMLAnchorElement && node.hasAttribute("download"));
+      if (!link?.hasAttribute("href")) return;
+      const target = URL.parse(link.href);
+      if (target?.origin !== location.origin || target.pathname.startsWith("/__p2page/")) return;
+      event.preventDefault();
+      // Chromium's native download request bypasses the controlling worker.
+      // Use an iframe navigation and an attachment response instead; the
+      // browser still streams the file directly to its download manager.
+      const frame = document.createElement("iframe");
+      frame.hidden = true;
+      frame.referrerPolicy = link.referrerPolicy;
+      frame.src = "/__p2page/download?" + new URLSearchParams({url:target.href, name:link.download});
+      frame.onload = () => frame.remove();
+      document.body.append(frame);
+      setTimeout(() => frame.remove(), 2 * 60 * 60 * 1000);
+    });
   }
   if (!bridge) return;
   const Native = window.WebSocket;

@@ -42,12 +42,15 @@ TURN 模式至少要有一个带凭据的 TURN URL，也可同时配置 STUN：
 ### 支持范围
 
 - 应用运行在全屏同源 iframe 中；悬浮球可拖动，可查看直连或 TURN 状态，连接失败时可重连。使用现代、启用 Service Worker 与 WebRTC 的浏览器。直接访问应用 URL 得到浏览器外壳，**不是**给 `curl`、原生 API 客户端或爬虫使用的 HTTP 反向代理。
-- 同源 iframe 导航、Fetch/XHR、EventSource、HTTP Range 视频请求及上传/下载走数据通道。HTTP 流采用有界分块和背压；不超过 64 KiB 的 URL 编码表单会带上实际 `Content-Length`，兼容依赖该字段的 LuCI 等 CGI。其他上传仍以流方式转交，上游必须接受 HTTP/1.1 chunked 或 HTTP/2 请求体。连接最长两小时；超大传输的实测吞吐取决于浏览器、SCTP、网络和 TURN。
+- 同源 iframe 导航、Fetch/XHR、EventSource、HTTP Range 视频请求及上传/下载走数据通道。HTTP 流采用有界分块和背压；不超过 64 KiB 的 URL 编码表单、multipart 表单和 keepalive 请求（含 `sendBeacon`）会带上实际 `Content-Length`。其他上传仍以流方式转交，上游必须接受 HTTP/1.1 chunked 或 HTTP/2 请求体。连接最长两小时；超大传输的实测吞吐取决于浏览器、SCTP、网络和 TURN。
+- 已由 p2page Service Worker 控制的同源应用可通过 `target="_top"` 或 `target="_blank"` 提交 POST；新外壳建链后只提交一次，支持普通响应和 `303` 等改用 GET 的跳转，不重放需要保留 POST 的 `307`/`308`。适用浏览器需携带同源 `Origin`。兼容脚本允许同源 `<a download>` 的普通点击和脚本点击走流式下载；浏览器右键「链接另存为」不在此范围。
 - 同源窗口 WebSocket 通过注入脚本桥接，支持文本、二进制和子协议，单条消息最大 16 MiB。上游需返回可注入的 HTML（一般为 UTF-8），且 CSP 要允许加载同源 `/__p2page/socket.js`；项目不移除上游 CSP。Web Worker 内的 WebSocket 不经过该桥接。
 - 应用 Cookie（包括 `HttpOnly`）保存在内网 Client 的内存中，按应用、上游和浏览器会话隔离。浏览器只在应用子域的 `localStorage` 中保存随机会话凭据，通过 WebRTC 交给 Client，刷新后可继续使用。Client 重启、清除站点存储、会话空闲七天或被容量淘汰后，需要重新登录应用。不要分享该会话凭据。
-- 同源 HTML 提供 `document.cookie` 兼容层，不向脚本提供 `HttpOnly` Cookie。若上游 CSP 禁止加载同源兼容脚本，这个兼容层也不可用。Cookie 不跨子域；原生 Cookie Store API、跨站行为和多标签实时同步不保证与浏览器原生 Cookie 完全一致。
+- 同源 HTML 提供 `document.cookie` 兼容层，不向脚本提供 `HttpOnly` Cookie。若上游 CSP 禁止加载同源兼容脚本，这个兼容层也不可用。Cookie 不跨子域；原生 Cookie Store API 和多标签实时同步不保证与浏览器原生 Cookie 一致。能从浏览器 Referrer 识别的跨站顶层导航及其同源 HTTP 跳转不发送 `SameSite=Strict` Cookie。没有 Referrer 的入口无法可靠地与地址栏导航区分；**不要依赖 p2page 的 `SameSite` 兼容作为唯一 CSRF 防护**。上游应验证 `Origin` 或使用 CSRF token，并避免用 GET 执行写操作。
 - 地址栏直接显示应用的路径、查询参数和应用自己的 `#` 路由；正常的 iframe 导航及同源 SPA 跳转会同步。Service Worker 接管后，普通刷新只向 Server 请求固定的外壳入口，应用路径仍通过 WebRTC 发给 Client。私有应用重新授权时，当前路径临时保存在该标签页。首次访问或强制刷新绕过 Service Worker 时，公网入口仍会收到 URL 的路径和查询参数。
 - 推荐上游支持相对 URL 或允许配置外部 URL；不会通用重写 HTML/JS 中写死的内网绝对地址。上游同源 `Location` 在映射的 base path 下会改写；外部 OAuth、跨域请求和拒绝 iframe 的策略需要按应用验证。不支持上游自己的 Service Worker 注册。`/__p2page/` 为保留路径。
+- 上游默认收到内网 `Host`，同源的 `Origin` 和 `Referer` 也映射到内网地址；如上游按公有地址校验 CSRF 或生成链接，可在 Client 对应 `upstreams` 项设置 `"public_origin_headers": true`，改用公有 `Host`、`Origin` 和浏览器允许携带的同源 `Referer`。该选项不会改变拨号地址或 TLS 校验名称。p2page 不转发浏览器声明的 `X-Forwarded-For` 或 `X-Real-IP`，也不伪造访问者 IP。
+- 通过数据通道构造的响应不会自动进入浏览器的 HTTP 缓存。Fetch/XHR 的 HTML 响应保留原始内容和验证器；注入了兼容脚本的页面导航响应会调整已知的 `Content-Length`，并移除不再适用的 `ETag` 等验证器。浏览器和上游之间也不是压缩透传，刷新和新标签页仍有独立建链成本。
 
 ### 运行与安全
 

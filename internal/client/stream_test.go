@@ -37,15 +37,19 @@ func TestHTMLInjection(t *testing.T) {
 func TestUpstreamFormBody(t *testing.T) {
 	for _, tc := range []struct {
 		name, typ, payload string
+		keepalive          bool
 		length             int64
 	}{
-		{"small form", "application/x-www-form-urlencoded; charset=UTF-8", "a=b", 3},
-		{"empty form", "application/x-www-form-urlencoded", "", 0},
-		{"large form", "application/x-www-form-urlencoded", "a=" + strings.Repeat("x", formBufferLimit), 0},
-		{"file", "application/octet-stream", "binary", 0},
+		{"small form", "application/x-www-form-urlencoded; charset=UTF-8", "a=b", false, 3},
+		{"empty form", "application/x-www-form-urlencoded", "", false, 0},
+		{"large form", "application/x-www-form-urlencoded", "a=" + strings.Repeat("x", formBufferLimit), false, 0},
+		{"multipart form", "multipart/form-data; boundary=abc", "--abc--\r\n", false, 9},
+		{"large multipart form", "multipart/form-data; boundary=abc", strings.Repeat("x", formBufferLimit+1), false, 0},
+		{"beacon", "text/plain", "hello", true, 5},
+		{"file", "application/octet-stream", "binary", false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body, err := upstreamBody(io.NopCloser(strings.NewReader(tc.payload)), tc.typ)
+			body, err := upstreamBody(io.NopCloser(strings.NewReader(tc.payload)), tc.typ, tc.keepalive)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -59,6 +63,30 @@ func TestUpstreamFormBody(t *testing.T) {
 				t.Fatalf("read %d bytes, content length %d: %v", len(got), r.ContentLength, err)
 			}
 		})
+	}
+}
+
+func TestRequestOrigin(t *testing.T) {
+	dest, _ := wire.ParseTarget("http://internal.test:8080")
+	const public = "https://app.example.test"
+	input := http.Header{
+		"Origin": {public}, "Referer": {public + "/page?x=1"},
+		"Host": {"spoof.test"}, "X-Real-Ip": {"127.0.0.1"}, "X-Forwarded-For": {"127.0.0.1"},
+	}
+	for _, tc := range []struct {
+		public       bool
+		origin, host string
+	}{
+		{false, dest.String(), ""},
+		{true, public, "app.example.test"},
+	} {
+		origin, host := requestOrigin(&upstream{publicOriginHeaders: tc.public}, dest, public)
+		headers := proxyHeaders(input, public, origin)
+		if origin != tc.origin || host != tc.host || headers.Get("Origin") != tc.origin ||
+			headers.Get("Referer") != tc.origin+"/page?x=1" || headers.Get("Host") != "" ||
+			headers.Get("X-Real-IP") != "" || headers.Get("X-Forwarded-For") != "" {
+			t.Fatalf("public=%t: origin=%q host=%q headers=%v", tc.public, origin, host, headers)
+		}
 	}
 }
 

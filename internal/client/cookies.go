@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pion/datachannel"
+	"golang.org/x/net/publicsuffix"
 	"p2page/internal/wire"
 )
 
@@ -180,7 +182,9 @@ func (j *cookieJar) set(lines []string, requestPath, basePath string, script boo
 		if n > maxJarBytes || (pos < 0 && len(j.items) >= maxCookies) {
 			continue
 		}
-		entry := storedCookie{Cookie: http.Cookie{Name: c.Name, Value: c.Value, Path: c.Path, HttpOnly: c.HttpOnly, Quoted: c.Quoted}, expires: exp}
+		entry := storedCookie{Cookie: http.Cookie{
+			Name: c.Name, Value: c.Value, Path: c.Path, HttpOnly: c.HttpOnly, Quoted: c.Quoted, SameSite: c.SameSite,
+		}, expires: exp}
 		if pos < 0 {
 			j.items = append(j.items, entry)
 		} else {
@@ -199,12 +203,32 @@ func (j *cookieJar) sortedItems(now time.Time) []storedCookie {
 	return items
 }
 
-func (j *cookieJar) header(path string) string {
+func crossSiteEntry(referrer, origin string) bool {
+	if referrer == "" {
+		return false
+	}
+	site := func(value string) string {
+		u, err := wire.ParseTarget(value)
+		if err != nil || u.Path != "" {
+			return ""
+		}
+		host := strings.ToLower(u.Hostname())
+		if net.ParseIP(host) == nil {
+			if registrable, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+				host = registrable
+			}
+		}
+		return u.Scheme + "://" + host
+	}
+	return site(referrer) != site(origin)
+}
+
+func (j *cookieJar) header(path string, crossSiteEntry bool) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	var pairs []string
 	for _, c := range j.sortedItems(time.Now()) {
-		if pathMatches(path, c.Path) {
+		if pathMatches(path, c.Path) && !(crossSiteEntry && c.SameSite == http.SameSiteStrictMode) {
 			pair := http.Cookie{Name: c.Name, Value: c.Value, Quoted: c.Quoted}
 			pairs = append(pairs, pair.String())
 		}

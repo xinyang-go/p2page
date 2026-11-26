@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func proxyHeaders(input http.Header, external, internal string) http.Header {
 		}
 	}
 	wire.CleanHeaders(h)
-	for _, k := range []string{"Host", "Content-Length", "Cookie", "Cookie2", "Accept-Encoding", "Expect", "Sec-Websocket-Key", "Sec-Websocket-Protocol", "Sec-Websocket-Version", "Sec-Websocket-Extensions"} {
+	for _, k := range []string{"Host", "X-Real-IP", "Content-Length", "Cookie", "Cookie2", "Accept-Encoding", "Expect", "Sec-Websocket-Key", "Sec-Websocket-Protocol", "Sec-Websocket-Version", "Sec-Websocket-Extensions"} {
 		h.Del(k)
 	}
 	if h.Get("Origin") == external {
@@ -77,6 +78,15 @@ func proxyHeaders(input http.Header, external, internal string) http.Header {
 }
 
 func upstreamOrigin(dest *url.URL) string { return dest.Scheme + "://" + dest.Host }
+
+func requestOrigin(u *upstream, dest *url.URL, external string) (origin, host string) {
+	if u.publicOriginHeaders {
+		if public, err := wire.ParseTarget(external); err == nil && public.Scheme == "https" && public.Path == "" {
+			return upstreamOrigin(public), public.Host
+		}
+	}
+	return upstreamOrigin(dest), ""
+}
 
 func replyHeaders(status int, h http.Header, base, dest *url.URL) wire.Response {
 	h = h.Clone()
@@ -104,7 +114,7 @@ func replyHeaders(status int, h http.Header, base, dest *url.URL) wire.Response 
 	}
 	h.Del("Set-Cookie")
 	h.Del("Set-Cookie2")
-	return wire.Response{Status: status, Headers: h}
+	return wire.Response{Status: status, StatusText: http.StatusText(status), Headers: h}
 }
 
 func applyResponseCookies(w *wire.Writer, jar *cookieJar, req wire.Request, h http.Header, base *url.URL) error {
@@ -118,6 +128,8 @@ func applyResponseCookies(w *wire.Writer, jar *cookieJar, req wire.Request, h ht
 }
 
 var doctype = regexp.MustCompile(`(?is)^((?:\x{FEFF})?\s*<!doctype[^>]*>)`)
+
+const htmlShim = `<script src="/__p2page/socket.js" referrerpolicy="no-referrer"></script>`
 
 func injectHTML(in io.Reader) io.Reader {
 	r := bufio.NewReaderSize(in, 4096)
@@ -140,7 +152,7 @@ func injectHTML(in io.Reader) io.Reader {
 	}
 	prefix := make([]byte, n)
 	_, _ = io.ReadFull(r, prefix)
-	return io.MultiReader(bytes.NewReader(prefix), strings.NewReader(`<script src="/__p2page/socket.js" referrerpolicy="no-referrer"></script>`), r)
+	return io.MultiReader(bytes.NewReader(prefix), strings.NewReader(htmlShim), r)
 }
 
 type uploadItem struct {
@@ -150,12 +162,12 @@ type uploadItem struct {
 
 const formBufferLimit = 64 << 10
 
-// Some CGI applications read POST data according to CONTENT_LENGTH, which
-// they don't receive for a chunked request. Give small forms a measured
-// length, while leaving larger bodies on the streaming path.
-func upstreamBody(body io.ReadCloser, contentType string) (io.Reader, error) {
+// Some CGI applications require CONTENT_LENGTH. Measure small form bodies
+// and keepalive uploads (including beacons), without buffering large uploads
+// or the first part of unrestricted streams.
+func upstreamBody(body io.ReadCloser, contentType string, keepalive bool) (io.Reader, error) {
 	typ, _, _ := mime.ParseMediaType(contentType)
-	if body == nil || typ != "application/x-www-form-urlencoded" {
+	if body == nil || (!keepalive && typ != "application/x-www-form-urlencoded" && typ != "multipart/form-data") {
 		return body, nil
 	}
 	prefix, err := io.ReadAll(io.LimitReader(body, formBufferLimit+1))
@@ -256,13 +268,14 @@ func serveHTTP(ctx context.Context, cancel context.CancelFunc, rw datachannel.Re
 			}
 		}
 	}()
-	headers := proxyHeaders(req.Headers, signal.Origin, upstreamOrigin(dest))
+	origin, host := requestOrigin(u, dest, signal.Origin)
+	headers := proxyHeaders(req.Headers, signal.Origin, origin)
 	if req.Body {
 		if w.Send(wire.Credit, []byte{wire.Window}) != nil {
 			return
 		}
 	}
-	inBody, err := upstreamBody(body, headers.Get("Content-Type"))
+	inBody, err := upstreamBody(body, headers.Get("Content-Type"), req.Keepalive)
 	if err != nil {
 		return
 	}
@@ -272,8 +285,11 @@ func serveHTTP(ctx context.Context, cancel context.CancelFunc, rw datachannel.Re
 		return
 	}
 	upReq.Header = headers
+	if host != "" {
+		upReq.Host = host
+	}
 	if req.Credentials {
-		if value := jar.header(cookieRequestPath(req.Path)); value != "" {
+		if value := jar.header(cookieRequestPath(req.Path), crossSiteEntry(req.EntryOrigin, signal.Origin)); value != "" {
 			upReq.Header.Set("Cookie", value)
 		}
 	}
@@ -287,12 +303,19 @@ func serveHTTP(ctx context.Context, cancel context.CancelFunc, rw datachannel.Re
 		return
 	}
 	res := replyHeaders(resp.StatusCode, resp.Header, base, dest)
+	if _, text, ok := strings.Cut(resp.Status, " "); ok && text != "" {
+		res.StatusText = text
+	}
 	typ, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	transform := req.Method != "HEAD" && resp.StatusCode != 204 && resp.StatusCode != 205 &&
+	disposition, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Disposition"))
+	transform := !req.Raw && disposition != "attachment" && req.Method != "HEAD" && resp.StatusCode != 204 && resp.StatusCode != 205 &&
 		resp.StatusCode != 206 && resp.StatusCode != 304 && typ == "text/html" && res.Headers.Get("Content-Encoding") == ""
 	if transform {
 		for _, k := range []string{"Content-Length", "ETag", "Content-Md5", "Digest", "Content-Digest", "Accept-Ranges"} {
 			res.Headers.Del(k)
+		}
+		if n := resp.ContentLength; n >= 0 && n <= (1<<63-1)-int64(len(htmlShim)) {
+			res.Headers.Set("Content-Length", strconv.FormatInt(n+int64(len(htmlShim)), 10))
 		}
 	}
 	if w.JSON(wire.Headers, res) != nil {
@@ -328,10 +351,14 @@ func serveHTTP(ctx context.Context, cancel context.CancelFunc, rw datachannel.Re
 }
 
 func serveSocket(ctx context.Context, rw datachannel.ReadWriteCloserDeadliner, w *wire.Writer, req wire.Request, signal wire.Signal, u *upstream, base, dest *url.URL, jar *cookieJar) {
-	h := proxyHeaders(req.Headers, signal.Origin, upstreamOrigin(dest))
-	h.Set("Origin", upstreamOrigin(dest))
+	origin, host := requestOrigin(u, dest, signal.Origin)
+	h := proxyHeaders(req.Headers, signal.Origin, origin)
+	h.Set("Origin", origin)
+	if host != "" {
+		h.Set("Host", host)
+	}
 	if req.Credentials {
-		if value := jar.header(cookieRequestPath(req.Path)); value != "" {
+		if value := jar.header(cookieRequestPath(req.Path), false); value != "" {
 			h.Set("Cookie", value)
 		}
 	}

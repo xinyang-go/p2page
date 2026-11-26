@@ -56,14 +56,18 @@ type Request struct {
 	Credentials    bool        `json:"credentials"`
 	CookieRevision uint64      `json:"cookieRevision,omitempty"`
 	Body           bool        `json:"body"`
+	Raw            bool        `json:"raw,omitempty"`
+	Keepalive      bool        `json:"keepalive,omitempty"`
+	EntryOrigin    string      `json:"entryOrigin,omitempty"`
 	WS             bool        `json:"ws"`
 	Protocols      []string    `json:"protocols"`
 }
 
 type Response struct {
-	Status   int         `json:"status"`
-	Headers  http.Header `json:"headers,omitempty"`
-	Protocol string      `json:"protocol,omitempty"`
+	Status     int         `json:"status"`
+	StatusText string      `json:"statusText,omitempty"`
+	Headers    http.Header `json:"headers,omitempty"`
+	Protocol   string      `json:"protocol,omitempty"`
 }
 
 type VisibleCookie struct {

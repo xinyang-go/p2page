@@ -30,14 +30,16 @@ type Config struct {
 	AllowedICEURLs *[]string  `json:"allowed_ice_urls,omitempty"`
 }
 type Upstream struct {
-	URL                string `json:"url"`
-	CAFile             string `json:"ca_file,omitempty"`
-	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty"`
+	URL                 string `json:"url"`
+	CAFile              string `json:"ca_file,omitempty"`
+	InsecureSkipVerify  bool   `json:"insecure_skip_verify,omitempty"`
+	PublicOriginHeaders bool   `json:"public_origin_headers,omitempty"`
 }
 type upstream struct {
-	base *url.URL
-	tr   *http.Transport
-	ws   *websocket.Dialer
+	base                *url.URL
+	tr                  *http.Transport
+	ws                  *websocket.Dialer
+	publicOriginHeaders bool
 }
 type client struct {
 	sessions sessionStore
@@ -142,7 +144,7 @@ func load(path string) (*client, error) {
 			return nil, errors.New("ca_file requires an HTTPS upstream")
 		}
 		dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-		c.origins[key] = &upstream{base: u,
+		c.origins[key] = &upstream{base: u, publicOriginHeaders: entry.PublicOriginHeaders,
 			tr: &http.Transport{DialContext: dialer.DialContext, TLSClientConfig: tc, ForceAttemptHTTP2: true,
 				TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 35 * time.Second, ExpectContinueTimeout: time.Second,
 				IdleConnTimeout: 90 * time.Second, MaxIdleConnsPerHost: 32, MaxConnsPerHost: 128, MaxResponseHeaderBytes: 48 << 10},

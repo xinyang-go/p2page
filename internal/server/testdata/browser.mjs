@@ -1,11 +1,13 @@
 import {spawn} from "node:child_process";
 import {createInterface} from "node:readline";
 import {once} from "node:events";
+import {createHash} from "node:crypto";
+import {readFile, readdir, mkdir} from "node:fs/promises";
 
 const [url, port, spki, profile, byteCount] = process.argv.slice(2);
 const browser = spawn("chromium", ["--headless", "--no-sandbox", "--disable-dev-shm-usage",
   "--no-proxy-server", "--disable-background-networking",
-  `--host-resolver-rules=MAP example.test 127.0.0.1:${port}, MAP *.example.test 127.0.0.1:${port}`,
+  `--host-resolver-rules=MAP example.test 127.0.0.1:${port}, MAP *.example.test 127.0.0.1:${port}, MAP outside.test 127.0.0.1:${port}`,
   "--ignore-certificate-errors-spki-list=" + spki, "--user-data-dir=" + profile + "/browser",
   "--remote-debugging-port=0", "about:blank"], {stdio:["ignore","ignore","pipe"]});
 const log = createInterface({input:browser.stderr});
@@ -14,10 +16,10 @@ const pending = new Map();
 const contexts = new Map();
 let id = 0;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-function cdp(method,params = {}) {
+function cdp(method,params = {}, sessionId) {
   return new Promise((resolve,reject) => {
     pending.set(++id,{resolve,reject});
-    ws.send(JSON.stringify({id,method,params}));
+    ws.send(JSON.stringify({id,method,params,sessionId}));
   });
 }
 async function evaluate(expression, contextId) {
@@ -100,6 +102,36 @@ try {
   })()`);
   await ready();
   await waitRoute("/web/#first-native");
+  if (await evaluate("document.title") !== "Fixture" || !await evaluate(`!!document.head.querySelector('link[rel=icon]')`))
+    throw Error("the application title or favicon was not mirrored");
+  const downloadDir = profile + "/downloads";
+  await mkdir(downloadDir);
+  await cdp("Browser.setDownloadBehavior",{behavior:"allow",downloadPath:downloadDir});
+  async function verifyDownload(name) {
+    for (let i = 0; i < 200; i++) {
+      if ((await readdir(downloadDir)).includes(name)) {
+        const bytes = await readFile(downloadDir + "/" + name);
+        const digest = data => createHash("sha256").update(data).digest("hex");
+        if (digest(bytes) !== digest("0123456789abcdef".repeat(Number(byteCount)/16)))
+          throw Error("download attribute saved the wrong contents: " + bytes.length + " bytes");
+        return;
+      }
+      await sleep(50);
+    }
+    throw Error("download did not finish: " + name);
+  }
+  await frameNavigation(`child.document.querySelector('#save').click()`);
+  await verifyDownload("fixture.bin");
+  const point = await evaluate(`(() => {
+    const frame = document.querySelector('#app');
+    const link = frame.contentDocument.querySelector('#save');
+    link.download = "mouse.bin";
+    const {x,y,width,height} = link.getBoundingClientRect(), rect = frame.getBoundingClientRect();
+    return {x:rect.x+x+width/2,y:rect.y+y+height/2};
+  })()`);
+  await cdp("Input.dispatchMouseEvent",{...point,type:"mousePressed",button:"left",clickCount:1});
+  await cdp("Input.dispatchMouseEvent",{...point,type:"mouseReleased",button:"left",clickCount:1});
+  await verifyDownload("mouse.bin");
   console.log("private application login handoff, direct WebRTC and chained iframe redirects ready");
   const tests = String.raw`(async () => {
     const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -139,6 +171,14 @@ try {
     assert(transfer[0] === String(bytes) && downloaded.length === bytes && downloaded.at(-1) === 102, "streamed upload/download");
     const range = await fetch("/download",{headers:{Range:"bytes=60-63"}});
     assert(range.status === 206 && await range.text() === "cdef", "video range request");
+    const html = await fetch("/web/");
+    assert(html.statusText === "OK" && html.headers.has("Content-Length") && !(await html.text()).includes("/__p2page/socket.js"),
+      "fetch did not return the original HTML and HTTP metadata");
+    const multipart = new FormData();
+    multipart.append("data", "value");
+    const [origin, referrer, length] = (await (await fetch("/request-metadata",{method:"POST",body:multipart})).text()).split("|");
+    assert(origin.startsWith("https://127.0.0.1:") && referrer === origin + "/web/" && Number(length) > 0,
+      "multipart fetch lost Origin, Referer or Content-Length");
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 32;
     const paint = canvas.getContext("2d");
@@ -250,6 +290,51 @@ try {
   await ready("login-ok");
   await waitRoute("/cgi-bin/luci/admin/?tab=home");
   console.log("iframe login POST, redirect and path-scoped HttpOnly cookie across reconnect passed");
+  await evaluate("history.back()");
+  await ready();
+  await frameNavigation(`const form = child.document.querySelector('form'); form.target = "_blank"; form.requestSubmit()`);
+  let popup;
+  for (let i = 0; i < 100 && !popup; i++) {
+    const tabs = await (await fetch(endpoint.replace("ws:","http:")+"/json/list")).json();
+    popup = tabs.find(t => t.type === "page" && t.id !== targets.find(t => t.type === "page").id);
+    if (!popup) await sleep(100);
+  }
+  if (!popup) throw Error("target=_blank did not open an application tab");
+  const {sessionId} = await cdp("Target.attachToTarget",{targetId:popup.id,flatten:true});
+  for (let i = 0; i < 100; i++) {
+    const {result} = await cdp("Runtime.evaluate",{expression:`location.pathname + location.search === "/cgi-bin/luci/admin/?tab=home" &&
+      !!document.querySelector('#app')?.contentDocument?.getElementById('login-ok')`,returnByValue:true},sessionId);
+    if (result.value) break;
+    if (i === 99) throw Error("target=_blank did not display the POST result");
+    await sleep(100);
+  }
+  await cdp("Target.closeTarget",{targetId:popup.id});
+  await frameNavigation(`const form = child.document.querySelector('form'); form.target = "_top"; form.submit()`);
+  await ready("login-ok");
+  await waitRoute("/cgi-bin/luci/admin/?tab=home");
+  console.log("top-level and new-tab form POSTs retained their application shell");
+  await cdp("Page.navigate",{url:"https://outside.test/"});
+  for (let i = 0; i < 100; i++) {
+    if (await evaluate(`location.host === "outside.test" && !!document.querySelector('a')`).catch(() => false)) break;
+    if (i === 99) throw Error("cross-site fixture did not open");
+    await sleep(50);
+  }
+  await evaluate(`document.querySelector('a').click()`);
+  await ready("strict-check");
+  await waitRoute("/strict-end");
+  if (await evaluate(`document.querySelector('#app').contentDocument.querySelector('#strict-check').textContent`) !== "withheld")
+    throw Error("SameSite=Strict cookie was sent on cross-site entry through a redirect");
+  await frameNavigation(`child.location.assign("/strict-end?from=same-site")`);
+  await waitRoute("/strict-end?from=same-site");
+  await ready("strict-check");
+  if (await evaluate(`document.querySelector('#app').contentDocument.querySelector('#strict-check').textContent`) !== "sent")
+    throw Error("SameSite=Strict cookie was lost on a subsequent same-site navigation");
+  await frameNavigation(`child.location.assign("/frame-denied")`);
+  for (let i = 0; i < 100; i++) {
+    if (await evaluate(`document.querySelector('#state')?.textContent === "Application frame unavailable"`)) break;
+    if (i === 99) throw Error("an X-Frame-Options failure was not shown");
+    await sleep(100);
+  }
 } finally {
   ws?.close();
   browser.kill();

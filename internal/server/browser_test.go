@@ -48,6 +48,7 @@ func TestBrowser(t *testing.T) {
 	block := bytes.Repeat([]byte("0123456789abcdef"), 512<<10)
 	var clip atomic.Value
 	var deepLinkReached atomic.Bool
+	var loginPosts atomic.Int32
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/style-burst/") {
 			// Keep this burst in flight long enough to exercise the peer's
@@ -73,10 +74,12 @@ func TestBrowser(t *testing.T) {
 				deepLinkReached.Store(true)
 			}
 			http.SetCookie(w, &http.Cookie{Name: "appSession", Value: "persisted", Path: "/", HttpOnly: true})
+			http.SetCookie(w, &http.Cookie{Name: "strictEntry", Value: "1", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 			w.Header().Set("Content-Type", "text/html")
 			w.Header().Set("Content-Security-Policy", "default-src 'self'")
-			_, _ = io.WriteString(w, `<!doctype html><html><title>Fixture</title><h1 id="fixture">Application is live</h1>
+			_, _ = io.WriteString(w, `<!doctype html><html><title>Fixture</title><link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E"><h1 id="fixture">Application is live</h1>
 				<form method="post" action="/cgi-bin/luci/"><input name="testuser" value="fixture"><button>Sign in</button></form>
+				<a id="save" href="/download-redirect" download="fixture.bin">Download</a>
 				<script src="/assets/static.js"></script></html>`)
 		case "/assets/static.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -90,6 +93,11 @@ func TestBrowser(t *testing.T) {
 				http.Error(w, "invalid login form", http.StatusBadRequest)
 				return
 			}
+			if r.Header.Get("Origin") != "https://"+r.Host || !strings.HasPrefix(r.Referer(), "https://"+r.Host+"/web/") {
+				http.Error(w, "form origin or referrer missing", http.StatusBadRequest)
+				return
+			}
+			loginPosts.Add(1)
 			http.SetCookie(w, &http.Cookie{Name: "routerSession", Value: "authenticated", Path: "/cgi-bin/luci/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 			w.Header().Set("Location", "admin/?tab=home")
 			w.WriteHeader(http.StatusSeeOther)
@@ -132,8 +140,25 @@ func TestBrowser(t *testing.T) {
 				return
 			}
 			_, _ = fmt.Fprint(w, n)
+		case "/request-metadata":
+			_, _ = fmt.Fprintf(w, "%s|%s|%d", r.Header.Get("Origin"), r.Referer(), r.ContentLength)
+		case "/frame-denied":
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, `<h1>Embeds denied</h1>`)
+		case "/strict-start":
+			http.Redirect(w, r, "/strict-end", http.StatusFound)
+		case "/strict-end":
+			w.Header().Set("Content-Type", "text/html")
+			status := "withheld"
+			if _, err := r.Cookie("strictEntry"); err == nil {
+				status = "sent"
+			}
+			_, _ = fmt.Fprintf(w, `<h1 id="strict-check">%s</h1>`, status)
 		case "/download":
 			http.ServeContent(w, r, "test.bin", time.Time{}, bytes.NewReader(block))
+		case "/download-redirect":
+			http.Redirect(w, r, "/download", http.StatusFound)
 		case "/video":
 			if r.Method == "POST" {
 				b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -188,12 +213,17 @@ func TestBrowser(t *testing.T) {
 	}
 	var shellRequests, leakedAppRequests, leakedCookies atomic.Int32
 	edge := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host == "outside.test" {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, `<a href="https://demo-admin.example.test/strict-start">Open app</a>`)
+			return
+		}
 		if r.URL.Path == "/__p2page/shell" {
 			shellRequests.Add(1)
 		}
 		for _, c := range r.Cookies() {
 			switch c.Name {
-			case "appSession", "routerSession", "saved", "visible", "ignored":
+			case "appSession", "routerSession", "saved", "visible", "ignored", "strictEntry":
 				leakedCookies.Add(1)
 			}
 		}
@@ -251,6 +281,9 @@ func TestBrowser(t *testing.T) {
 	if shellRequests.Load() == 0 || leakedAppRequests.Load() != 0 || leakedCookies.Load() != 0 || !deepLinkReached.Load() {
 		t.Fatalf("unexpected network activity: shell=%d app requests=%d app cookies=%d deep link reached=%v",
 			shellRequests.Load(), leakedAppRequests.Load(), leakedCookies.Load(), deepLinkReached.Load())
+	}
+	if n := loginPosts.Load(); n != 3 {
+		t.Fatalf("expected exactly one upstream POST per form submission, got %d", n)
 	}
 	t.Logf("%s", out)
 }

@@ -8,6 +8,22 @@ import (
 	"time"
 )
 
+func TestStrictCookiesOnCrossSiteEntry(t *testing.T) {
+	var j cookieJar
+	j.set([]string{"strict=1; SameSite=Strict", "lax=1; SameSite=Lax"}, "/", "", false, time.Now())
+	const app = "https://demo.example.test"
+	for referrer, want := range map[string]string{
+		"":                           "strict=1; lax=1",
+		"https://other.example.test": "strict=1; lax=1",
+		"http://other.example.test":  "lax=1",
+		"https://outside.test":       "lax=1",
+	} {
+		if got := j.header("/", crossSiteEntry(referrer, app)); got != want {
+			t.Errorf("referrer=%q: cookies=%q, want %q", referrer, got, want)
+		}
+	}
+}
+
 func TestCookieJar(t *testing.T) {
 	now := time.Now()
 	j := &cookieJar{}
@@ -20,17 +36,17 @@ func TestCookieJar(t *testing.T) {
 		"old=expired; Max-Age=0",
 		"__Host-p2page-grant=ignored; Path=/; Secure",
 	}, "/nested/login", "/apps/demo", false, now)
-	if got := j.header("/admin/panel"); got != "scoped=two; sid=private; shared=one" {
+	if got := j.header("/admin/panel", false); got != "scoped=two; sid=private; shared=one" {
 		t.Fatalf("unexpected cookie header: %q", got)
 	}
-	if got := j.header("/nested/page"); got != "defaulted=three; sid=private; shared=one" {
+	if got := j.header("/nested/page", false); got != "defaulted=three; sid=private; shared=one" {
 		t.Fatalf("unexpected default path: %q", got)
 	}
-	if got := j.header("/nestedElsewhere"); got != "sid=private; shared=one" {
+	if got := j.header("/nestedElsewhere", false); got != "sid=private; shared=one" {
 		t.Fatalf("unexpected cookie across path boundary: %q", got)
 	}
 	j.set([]string{"sid=guessed; Path=/", "sid=; Max-Age=0; Path=/", "shared=; Max-Age=0; Path=/", "js=allowed; Path=/"}, "/", "", true, now)
-	if got := j.header("/"); got != "sid=private; js=allowed" {
+	if got := j.header("/", false); got != "sid=private; js=allowed" {
 		t.Fatalf("script mutated HttpOnly cookie: %q", got)
 	}
 	state := j.state(nil)
@@ -43,7 +59,7 @@ func TestCookieJar(t *testing.T) {
 		t.Fatal("unchanged state was resent")
 	}
 	j.set([]string{"sid=; Max-Age=0; Path=/"}, "/", "", false, now)
-	if got := j.header("/"); got != "js=allowed" {
+	if got := j.header("/", false); got != "js=allowed" {
 		t.Fatalf("upstream logout did not remove cookie: %q", got)
 	}
 }
@@ -65,7 +81,7 @@ func TestCookieSessionScopeAndReconnect(t *testing.T) {
 	first.set([]string{"sid=private; Path=/"}, "/", "", false, time.Now())
 	release()
 	again, release := acquire(1, "http://device.lan", capability(1), 0)
-	if got := again.header("/"); got != "sid=private" {
+	if got := again.header("/", false); got != "sid=private" {
 		t.Fatal("browser reconnect lost cookie")
 	}
 	release()
@@ -81,7 +97,7 @@ func TestCookieSessionScopeAndReconnect(t *testing.T) {
 		{1, "http://device.lan", capability(1), sessionIdle + time.Second},
 	} {
 		other, done := acquire(scope.app, scope.target, scope.cap, scope.offset)
-		if other.header("/") != "" {
+		if other.header("/", false) != "" {
 			t.Fatal("cookie leaked across session, app, upstream or idle expiry")
 		}
 		done()

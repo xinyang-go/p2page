@@ -63,14 +63,50 @@ function reportRoute(source) {
   } catch { /* An external navigation is not mirrored into the application URL. */ }
 }
 window.p2pageRoute = reportRoute;
+let stopAppearance, frameUnavailable = false;
 frame.addEventListener("load", () => {
+  stopAppearance?.();
+  stopAppearance = undefined;
   const child = frame.contentWindow;
   reportRoute(child);
   try {
     // Catch History API changes even when the upstream's CSP blocks the shim.
     child.navigation?.addEventListener("currententrychange", () => reportRoute(child));
-  } catch { /* The frame may have navigated outside this origin. */ }
+    stopAppearance = mirrorAppearance(child.document);
+    frameUnavailable = false;
+  } catch {
+    document.title = "p2page · Application";
+    frameUnavailable = true;
+  }
+  if (open()) showConnected().catch(() => {});
 });
+function mirrorAppearance(appDocument) {
+  let icon, started = false;
+  function sync() {
+    document.title = appDocument.title;
+    const link = appDocument.querySelector('link[rel~="icon" i][href]');
+    const href = link?.href;
+    if (started && icon?.href === href && icon?.type === link?.type && icon?.sizes.value === link?.sizes.value) return;
+    started = true;
+    icon?.remove();
+    icon = null;
+    if (href && (URL.parse(href)?.origin === location.origin || href.startsWith("data:"))) {
+      icon = document.createElement("link");
+      icon.rel = "icon";
+      icon.href = href;
+      icon.type = link.type;
+      icon.sizes.value = link.sizes.value;
+      document.head.append(icon);
+    }
+  }
+  const observer = new MutationObserver(sync);
+  observer.observe(appDocument.head || appDocument.documentElement, {
+    subtree:true, childList:true, characterData:true, attributes:true,
+    attributeFilter:["rel","href","type","sizes"]
+  });
+  sync();
+  return () => { observer.disconnect(); icon?.remove(); };
+}
 window.addEventListener("hashchange", () => {
   const desired = location.href;
   // A manually edited hash does not reload the top document. Let joint
@@ -129,6 +165,22 @@ async function until(test, target, event, ms, message) {
       listener();
     })]);
   } finally { limit.stop(); target.removeEventListener(event, listener); }
+}
+function initialNavigation(worker, path) {
+  const {port1, port2} = new MessageChannel();
+  const limit = timeout(2500, "Service Worker did not acknowledge the application navigation");
+  return Promise.race([limit.promise, new Promise((resolve, reject) => {
+    port1.onmessage = event => {
+      if (event.data.error) reject(new Error(event.data.error));
+      else if (!event.data.post && document.querySelector('meta[name="p2page-post"]'))
+        reject(new Error("Form submission expired. Return to the application and submit it again."));
+      else resolve(event.data.path);
+    };
+    worker.postMessage({
+      type:"initial-navigation", url:location.origin + path,
+      referrer:window.navigation?.activation?.navigationType === "reload" ? "" : document.referrer
+    }, [port2]);
+  })]).finally(() => { limit.stop(); port1.close(); });
 }
 async function connect() {
   if (!navigator.serviceWorker || !window.RTCPeerConnection) throw new Error("a browser with Service Workers and WebRTC on HTTPS is required");
@@ -203,7 +255,8 @@ async function connect() {
   await until(() => !!navigator.serviceWorker.controller, navigator.serviceWorker, "controllerchange", 8000, "Service Worker did not take control.");
   // A hard reload can bypass Service Worker interception for the outer page.
   if (!sw.active) throw new Error("Service Worker installation failed");
-  frame.src = location.origin + initialPath;
+  const entry = await initialNavigation(navigator.serviceWorker.controller, initialPath);
+  frame.src = location.origin + (entry || initialPath);
   setPanel(false);
   await showConnected();
 }
@@ -224,7 +277,11 @@ async function showConnected() {
     }
     break;
   }
-  if (open()) status("Connected", route);
+  if (open()) {
+    if (frameUnavailable) status("Application frame unavailable",
+      "WebRTC is connected, but the page left this origin or the browser blocked it from opening in a frame.", true);
+    else status("Connected", route);
+  }
 }
 
 function send(dc, kind, payload = new Uint8Array()) {
@@ -450,7 +507,7 @@ function serveHTTP(req, body, port) {
           case P.headers: {
             const info = JSON.parse(decoder.decode(payload));
             const canStream = req.method !== "HEAD" && ![204,205,304].includes(info.status);
-            port.postMessage({status:info.status, headers:info.headers, stream:canStream ? stream : null}, canStream ? [stream] : []);
+            port.postMessage({status:info.status, statusText:info.statusText, headers:info.headers, stream:canStream ? stream : null}, canStream ? [stream] : []);
             headersSent = true;
             if (!canStream) finish();
             break;
