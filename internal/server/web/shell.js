@@ -90,7 +90,10 @@ function mirrorAppearance(appDocument) {
     started = true;
     icon?.remove();
     icon = null;
-    if (href && (URL.parse(href)?.origin === location.origin || href.startsWith("data:"))) {
+    let iconURL;
+    try { if (href) iconURL = new URL(href); }
+    catch { /* Invalid icon URL. */ }
+    if (iconURL && (iconURL.origin === location.origin || iconURL.protocol === "data:")) {
       icon = document.createElement("link");
       icon.rel = "icon";
       icon.href = href;
@@ -166,21 +169,42 @@ async function until(test, target, event, ms, message) {
     })]);
   } finally { limit.stop(); target.removeEventListener(event, listener); }
 }
-function initialNavigation(worker, path) {
+async function requestInitialNavigation(worker, request) {
   const {port1, port2} = new MessageChannel();
-  const limit = timeout(2500, "Service Worker did not acknowledge the application navigation");
-  return Promise.race([limit.promise, new Promise((resolve, reject) => {
-    port1.onmessage = event => {
-      if (event.data.error) reject(new Error(event.data.error));
-      else if (!event.data.post && document.querySelector('meta[name="p2page-post"]'))
-        reject(new Error("Form submission expired. Return to the application and submit it again."));
-      else resolve(event.data.path);
-    };
-    worker.postMessage({
-      type:"initial-navigation", url:location.origin + path,
-      referrer:window.navigation?.activation?.navigationType === "reload" ? "" : document.referrer
-    }, [port2]);
-  })]).finally(() => { limit.stop(); port1.close(); });
+  let timer;
+  try {
+    return await new Promise(resolve => {
+      timer = setTimeout(resolve, 2500);
+      port1.onmessage = event => resolve(event.data);
+      worker.postMessage(request, [port2]);
+    });
+  } finally { clearTimeout(timer); port1.close(); }
+}
+async function initialNavigation(registration, path) {
+  const workers = navigator.serviceWorker;
+  const request = {
+    type:"initial-navigation", url:location.origin + path,
+    referrer:window.navigation?.activation?.navigationType === "reload" ? "" : document.referrer
+  };
+  const post = document.querySelector('meta[name="p2page-post"]');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // A hard reload can bypass interception for the outer page, and a worker
+    // update can replace the controller while the shell is connecting.
+    await until(() => !!workers.controller, workers, "controllerchange", 8000, "Service Worker did not take control.");
+    const worker = workers.controller;
+    const reply = await requestInitialNavigation(worker, request);
+    if (reply && worker === workers.controller) {
+      if (reply.error) throw new Error(reply.error);
+      if (post && !reply.post)
+        throw new Error("Form submission expired. Return to the application and submit it again.");
+      return reply.path;
+    }
+    // An older controller may not implement this message. Check for an
+    // update without blocking retries on a slow network. A staged POST lives
+    // only in its original worker, so don't trigger an update for it.
+    if (!post && attempt === 0 && worker === workers.controller) registration.update().catch(() => {});
+  }
+  throw new Error("Service Worker did not acknowledge the application navigation");
 }
 async function connect() {
   if (!navigator.serviceWorker || !window.RTCPeerConnection) throw new Error("a browser with Service Workers and WebRTC on HTTPS is required");
@@ -251,11 +275,7 @@ async function connect() {
   const sessionFailure = "The Client did not open the application session. Check the Client version and retry.";
   await until(() => open() || control.readyState === "closed", peerEvents, "change", 10000, sessionFailure);
   if (!open()) throw new Error(sessionFailure);
-  const sw = await registration;
-  await until(() => !!navigator.serviceWorker.controller, navigator.serviceWorker, "controllerchange", 8000, "Service Worker did not take control.");
-  // A hard reload can bypass Service Worker interception for the outer page.
-  if (!sw.active) throw new Error("Service Worker installation failed");
-  const entry = await initialNavigation(navigator.serviceWorker.controller, initialPath);
+  const entry = await initialNavigation(await registration, initialPath);
   frame.src = location.origin + (entry || initialPath);
   setPanel(false);
   await showConnected();

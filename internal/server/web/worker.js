@@ -1,11 +1,16 @@
 "use strict";
 const prefix = "/__p2page/";
 const pendingNavigations = new Map(), iframeNavigations = new Map();
-self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("install", event => event.waitUntil(self.skipWaiting()));
 self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
 
+function parseURL(value, base) {
+  try { return new URL(value, base); }
+  catch { return null; }
+}
+
 function localURL(value) {
-  const url = URL.parse(value);
+  const url = parseURL(value);
   return url?.origin === self.location.origin && !url.username && !url.password && !url.pathname.startsWith(prefix) ? url : null;
 }
 
@@ -14,7 +19,7 @@ self.addEventListener("message", event => {
   if (data?.type !== "initial-navigation" || !port || source?.type !== "window" || source.frameType === "nested") return;
   let entry = pendingNavigations.get(source.id);
   const target = localURL(data.url);
-  const referrer = URL.parse(data.referrer);
+  const referrer = parseURL(data.referrer);
   if (!entry && target && referrer && /^https?:$/.test(referrer.protocol) && referrer.origin !== self.location.origin) {
     if (pendingNavigations.size >= 32) {
       port.postMessage({error:"Too many pending application navigations"});
@@ -55,7 +60,7 @@ self.addEventListener("fetch", event => {
         return problem(502, "Method-preserving redirects are not supported for top-level form submissions");
       }
       if (!post) {
-        const next = [301,302,303,307,308].includes(res.status) && location && URL.parse(location, req.url);
+        const next = [301,302,303,307,308].includes(res.status) && location && parseURL(location, req.url);
         if (next && localURL(next.href)) carried.url = next.href;
         else carried.release();
       }
@@ -234,7 +239,7 @@ async function route(req, clientID, options = {}) {
 
 function downloadHeaders(target, name, status, headers) {
   if ([301,302,303,307,308].includes(status) && headers.has("Location")) {
-    const next = URL.parse(headers.get("Location"), target);
+    const next = parseURL(headers.get("Location"), target);
     if (next && localURL(next.href)) {
       headers.set("Location", prefix + "download?" + new URLSearchParams({url:next.href, name}));
     } else if (next) headers.set("Location", next.href);

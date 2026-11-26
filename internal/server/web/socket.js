@@ -41,8 +41,10 @@
       if (event.defaultPrevented || event.button !== 0) return;
       const link = event.composedPath().find(node => node instanceof HTMLAnchorElement && node.hasAttribute("download"));
       if (!link?.hasAttribute("href")) return;
-      const target = URL.parse(link.href);
-      if (target?.origin !== location.origin || target.pathname.startsWith("/__p2page/")) return;
+      let target;
+      try { target = new URL(link.href); }
+      catch { return; }
+      if (target.origin !== location.origin || target.pathname.startsWith("/__p2page/")) return;
       event.preventDefault();
       // Chromium's native download request bypasses the controlling worker.
       // Use an iframe navigation and an attachment response instead; the

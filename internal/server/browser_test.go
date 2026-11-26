@@ -238,6 +238,29 @@ func TestBrowser(t *testing.T) {
 			// maps the public names to this listener through its resolver.
 			r.Host = "example.test"
 		}
+		if r.URL.Path == "/__p2page/worker.js" {
+			worker := httptest.NewRecorder()
+			s.ServeHTTP(worker, r)
+			for name, values := range worker.Header() {
+				w.Header()[name] = values
+			}
+			w.WriteHeader(worker.Code)
+			if worker.Code == http.StatusOK && r.Method == http.MethodGet {
+				// Simulate an older browser and one lost acknowledgement on
+				// first visit. The shell must load without a manual reload.
+				_, _ = io.WriteString(w, `"use strict";
+URL.parse = undefined;
+let missedInitialNavigation = false;
+self.addEventListener("message", event => {
+  if (event.data?.type !== "initial-navigation" || missedInitialNavigation) return;
+  missedInitialNavigation = true;
+  event.stopImmediatePropagation();
+});
+`)
+			}
+			_, _ = w.Write(worker.Body.Bytes())
+			return
+		}
 		s.ServeHTTP(w, r)
 	}))
 	defer edge.Close()
