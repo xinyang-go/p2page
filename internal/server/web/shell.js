@@ -161,8 +161,41 @@ orb.onclick = event => {
   if (!drag?.moved || event.detail === 0) setPanel(panel.hidden);
   drag = null;
 };
-orb.onpointercancel = () => { drag = null; };
-addEventListener("resize", positionPanel);
+orb.onpointerup = event => {
+  if (drag?.moved && drag.id === event.pointerId) saveOrbPosition();
+};
+orb.onpointercancel = () => {
+  if (drag?.moved) saveOrbPosition();
+  drag = null;
+};
+// Each application has its own origin, and the host keeps the saved position
+// separate even if one origin ever hosts more than one application.
+const orbPositionKey = "__p2page_orb_position_v1:" + location.host;
+function saveOrbPosition() {
+  const rect = orb.getBoundingClientRect();
+  try {
+    localStorage.setItem(orbPositionKey, JSON.stringify({left:Math.round(rect.left), top:Math.round(rect.top)}));
+  } catch { /* Storage unavailable: the position lasts for this page only. */ }
+}
+function restoreOrbPosition() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(orbPositionKey)); } catch { return; }
+  if (!Number.isFinite(saved?.left) || !Number.isFinite(saved?.top)) return;
+  orb.style.left = saved.left + "px";
+  orb.style.top = saved.top + "px";
+  clampOrb();
+}
+// A restored or dragged orb is positioned with explicit coordinates, so keep
+// it visible when the viewport shrinks. The untouched default stays anchored
+// to the bottom-right corner through CSS.
+function clampOrb() {
+  if (!orb.style.left && !orb.style.top) return;
+  const rect = orb.getBoundingClientRect();
+  orb.style.left = Math.max(0, Math.min(innerWidth - orb.offsetWidth, rect.left)) + "px";
+  orb.style.top = Math.max(0, Math.min(innerHeight - orb.offsetHeight, rect.top)) + "px";
+}
+restoreOrbPosition();
+addEventListener("resize", () => { clampOrb(); positionPanel(); });
 new ResizeObserver(positionPanel).observe(panel);
 positionPanel();
 

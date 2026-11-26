@@ -41,7 +41,7 @@ TURN 模式至少要有一个带凭据的 TURN URL，也可同时配置 STUN：
 
 ### 支持范围
 
-- 应用运行在全屏同源 iframe 中；悬浮球可拖动，可查看直连或 TURN 状态，连接失败时可重连。使用现代、启用 Service Worker 与 WebRTC 的浏览器。直接访问应用 URL 得到浏览器外壳，**不是**给 `curl`、原生 API 客户端或爬虫使用的 HTTP 反向代理。
+- 应用运行在全屏同源 iframe 中；悬浮球可拖动，每个应用独立记住摆放位置，可查看直连或 TURN 状态，连接失败时可重连。使用现代、启用 Service Worker 与 WebRTC 的浏览器。直接访问应用 URL 得到浏览器外壳，**不是**给 `curl`、原生 API 客户端或爬虫使用的 HTTP 反向代理。
 - 同源 iframe 导航、Fetch/XHR、EventSource、HTTP Range 视频请求及上传/下载走数据通道。HTTP 流采用有界分块和背压；不超过 64 KiB 的 URL 编码表单、multipart 表单和 keepalive 请求（含 `sendBeacon`）会带上实际 `Content-Length`。其他上传仍以流方式转交，上游必须接受 HTTP/1.1 chunked 或 HTTP/2 请求体。连接最长两小时；超大传输的实测吞吐取决于浏览器、SCTP、网络和 TURN。
 - 已由 p2page Service Worker 控制的同源应用可通过 `target="_top"` 或 `target="_blank"` 提交 POST；新外壳建链后只提交一次，支持普通响应和 `303` 等改用 GET 的跳转，不重放需要保留 POST 的 `307`/`308`。适用浏览器需携带同源 `Origin`。兼容脚本允许同源 `<a download>` 的普通点击和脚本点击走流式下载；浏览器右键「链接另存为」不在此范围。
 - 同源窗口 WebSocket 通过注入脚本桥接，支持文本、二进制和子协议，单条消息最大 16 MiB。上游需返回可注入的 HTML（一般为 UTF-8），且 CSP 要允许加载同源 `/__p2page/socket.js`；项目不移除上游 CSP。Web Worker 内的 WebSocket 不经过该桥接。
